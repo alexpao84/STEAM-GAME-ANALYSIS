@@ -3,96 +3,106 @@ import requests
 import time
 from tqdm import tqdm
 
-# ======================================================
-# CONFIG
-# ======================================================
-STEAM_STORE_API = "https://store.steampowered.com/api/appdetails"
+STEAM_SEARCH_API = "https://store.steampowered.com/api/storesearch"
+STEAM_APP_API = "https://store.steampowered.com/api/appdetails"
 
 INPUT_CSV = "data/raw/steam_charts.csv"
-OUTPUT_CSV = "data/processed/steam_analysis_by_game.csv"
+OUTPUT_CSV = "data/processed/steam_snapshot_analysis.csv"
 
-HOURS_PER_DAY = 2          # explicit assumption
-DAYS_PER_MONTH = 30        # explicit assumption
-REQUEST_DELAY = 0.8        # seconds (API friendly)
+REQUEST_DELAY = 0.8
+HEADERS = {"User-Agent": "steam-playtime-analysis/1.0"}
 
-HEADERS = {
-    "User-Agent": "steam-playtime-analysis/1.0"
-}
-
-# ======================================================
-# LOAD INPUT DATA
-# ======================================================
+# ==========================
+# LOAD DATA
+# ==========================
 df = pd.read_csv(INPUT_CSV)
 
-required_cols = {"app_id", "game_name", "year", "month", "avg_players"}
-missing = required_cols - set(df.columns)
-
+required = {"name", "cur_players", "peak_players", "hours_played", "release_date"}
+missing = required - set(df.columns)
 if missing:
-    raise ValueError(f"Missing required columns: {missing}")
+    raise ValueError(f"Missing columns: {missing}")
 
-df["year"] = df["year"].astype(int)
-df["avg_players"] = df["avg_players"].fillna(0)
-
-# ======================================================
-# STEAM METADATA
-# ======================================================
-def fetch_steam_metadata(app_id):
-    """
-    Fetch genre and age rating from Steam Store API.
-    Returns dict or None if unavailable.
-    """
+# ==========================
+# FETCH APP ID FROM NAME
+# ==========================
+def find_app_id(game_name):
     try:
         r = requests.get(
-            STEAM_STORE_API,
+            STEAM_SEARCH_API,
+            params={"term": game_name, "l": "english", "cc": "US"},
+            headers=HEADERS,
+            timeout=10
+        )
+        items = r.json().get("items", [])
+        if items:
+            return items[0]["id"]
+    except Exception:
+        return None
+
+# ==========================
+# FETCH METADATA
+# ==========================
+def fetch_metadata(app_id):
+    try:
+        r = requests.get(
+            STEAM_APP_API,
             params={"appids": app_id},
             headers=HEADERS,
             timeout=10
         )
-        payload = r.json().get(str(app_id))
-        if not payload or not payload.get("success"):
+        data = r.json().get(str(app_id))
+        if not data or not data["success"]:
             return None
 
-        data = payload["data"]
-        genres = [g["description"] for g in data.get("genres", [])]
-        age = int(data.get("required_age", 0))
+        d = data["data"]
+        genres = [g["description"] for g in d.get("genres", [])]
+        age = int(d.get("required_age", 0))
 
         return {
+            "app_id": app_id,
             "genres": ", ".join(genres) if genres else "Unknown",
             "age_rating": age
         }
     except Exception:
         return None
 
-# ======================================================
-# FETCH METADATA (CACHED IN-MEMORY)
-# ======================================================
-metadata = {}
+# ==========================
+# PROCESS GAMES
+# ==========================
+rows = []
 
-unique_apps = df["app_id"].unique()
+for _, row in tqdm(df.iterrows(), total=len(df), desc="Processing games"):
+    name = row["name"]
 
-for app_id in tqdm(unique_apps, desc="Fetching Steam metadata"):
-    meta = fetch_steam_metadata(app_id)
-    if meta:
-        metadata[app_id] = meta
+    app_id = find_app_id(name)
+    if not app_id:
+        continue
+
+    meta = fetch_metadata(app_id)
+    if not meta:
+        continue
+
+    avg_hours_per_player = row["hours_played"] / max(row["peak_players"], 1)
+
+    rows.append({
+        "game_name": name,
+        "app_id": app_id,
+        "release_year": row["release_date"][:4],
+        "genres": meta["genres"],
+        "age_rating": meta["age_rating"],
+        "cur_players": row["cur_players"],
+        "peak_players": row["peak_players"],
+        "hours_played": row["hours_played"],
+        "hours_per_player": round(avg_hours_per_player, 1)
+    })
+
     time.sleep(REQUEST_DELAY)
 
-meta_df = (
-    pd.DataFrame.from_dict(metadata, orient="index")
-    .reset_index()
-    .rename(columns={"index": "app_id"})
-)
+out = pd.DataFrame(rows)
 
-# ======================================================
-# MERGE DATA
-# ======================================================
-df = df.merge(meta_df, on="app_id", how="left")
-
-df["genres"].fillna("Unknown", inplace=True)
-df["age_rating"].fillna(0, inplace=True)
-
-# ======================================================
-# AGE BUCKETS
-# ======================================================
+# ==========================
+# AGE BUCKET
+# ==========================
 def age_bucket(age):
     if age == 0:
         return "All ages"
@@ -104,39 +114,9 @@ def age_bucket(age):
         return "16+"
     return "18+"
 
-df["age_group"] = df["age_rating"].apply(age_bucket)
+out["age_group"] = out["age_rating"].apply(age_bucket)
 
-# ======================================================
-# PLAYTIME ESTIMATION (PROXY MODEL)
-# ======================================================
-df["estimated_hours"] = (
-    df["avg_players"]
-    * DAYS_PER_MONTH
-    * HOURS_PER_DAY
-)
+out.to_csv(OUTPUT_CSV, index=False)
 
-# ======================================================
-# ANNUAL AGGREGATION (PER GAME)
-# ======================================================
-annual = (
-    df.groupby(
-        ["year", "app_id", "game_name", "genres", "age_group"],
-        as_index=False
-    )
-    .agg(
-        avg_players=("avg_players", "mean"),
-        total_hours=("estimated_hours", "sum")
-    )
-)
-
-annual["hours_per_player"] = (
-    annual["total_hours"] / annual["avg_players"]
-).round(1)
-
-# ======================================================
-# EXPORT
-# ======================================================
-annual.to_csv(OUTPUT_CSV, index=False)
-
-print("✔ Analysis completed")
-print(f"✔ Output written to: {OUTPUT_CSV}")
+print("✔ Snapshot analysis completed")
+print(f"✔ Output: {OUTPUT_CSV}")
