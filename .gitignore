@@ -10,10 +10,6 @@ venv/
 # Jupyter
 .ipynb_checkpoints/
 
-# Data (raw + generated)
-data/raw/*.csv
-data/processed/*.csv
-
 # OS
 .DS_Store
 Thumbs.db
