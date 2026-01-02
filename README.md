@@ -57,20 +57,20 @@ Repository structure
 steam-playtime-analysis/
 │
 ├── data/
-│   ├── demo/
 │   ├── raw/
-│   │   └── steam_charts.csv        # input dataset
+│   │   ├── .gitkeep
+│   │   └── sample_steam_charts.csv
 │   └── processed/
-│       └── steam_analysis_by_game.csv
+│       └── .gitkeep
 │
 ├── scripts/
-│   └── analyze_steam.py            # main analysis script
-│
-├── notebooks/
-│   └── exploration.ipynb           # optional exploratory analysis
+│   └── analyze_steam.py
 │
 ├── README.md
-└── requirements.txt
+├── CONTRIBUTING.md
+├── requirements.txt
+├── .gitignore
+└── LICENSE
 
 ## Input dataset format
 
@@ -83,6 +83,8 @@ Example:
 
 730,Counter-Strike 2,2023,1,620000
 730,Counter-Strike 2,2023,2,610000
+
+A small sample dataset (sample_steam_charts.csv) is provided for testing and demonstration purposes.
 
 ## How the analysis works
 ### 1. Load historical player counts
