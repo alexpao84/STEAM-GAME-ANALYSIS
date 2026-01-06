@@ -43,7 +43,6 @@ def find_app_id(game_name):
         pass
     return None
 
-
 def fetch_metadata(app_id):
     try:
         r = requests.get(
@@ -57,17 +56,27 @@ def fetch_metadata(app_id):
             return None
 
         data = payload["data"]
+
         genres = [g["description"] for g in data.get("genres", [])]
         age = int(data.get("required_age", 0))
 
+        is_free = data.get("is_free", False)
+
+        price_eur = 0.0
+        if not is_free:
+            price_info = data.get("price_overview")
+            if price_info:
+                price_eur = price_info.get("final", 0) / 100.0
+
         return {
             "primary_genre": genres[0] if genres else "Unknown",
-            "age_rating": age
+            "age_rating": age,
+            "is_free": is_free,
+            "price_eur": price_eur
         }
     except Exception:
         pass
     return None
-
 
 def age_bucket(age):
     if age == 0:

@@ -182,6 +182,12 @@ python scripts/analyze_steam.py
 
 This repository does not claim precision, only consistency and analytical usefulness.
 
+# Venv exec
+
+source venv/bin/activate
+pip install -r requirements.txt
+python scripts/analyze_steam.py
+
 # License
 
 MIT License
